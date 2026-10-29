@@ -5,7 +5,7 @@ MOTIVE is a local-first iPhone fitness and weight-management app prototype.
 ## Included in this first build
 
 - Daily weight entry and a weight trend view
-- Food and snack entries with calorie totals
+- Searchable starter food catalog with gram-based calorie calculation and manual entry
 - Separate manual strength-training records
 - Apple Health steps, active energy, and workout sync (iOS development build required)
 - Estimated resting energy (BMR) plus logged active calories
@@ -27,8 +27,10 @@ This project targets Expo SDK 58. Apple Health data is read-only and requires an
 
 ## Next implementation steps
 
-1. Add searchable Japanese food entries and photo-assisted calorie estimation with a user confirmation step.
+1. Expand the searchable food catalog and add photo-assisted calorie estimation with a user confirmation step.
 2. Refine HealthKit authorization states and historical sync behavior.
 3. Add stronger duplicate detection between manual and HealthKit workouts.
+
+The starter food catalog uses energy values per edible 100 g from the MEXT “Standard Tables of Food Composition in Japan (2023 Supplement).” Source: https://www.mext.go.jp/a_menu/syokuhinseibun/index.htm
 
 HealthKit reads are initiated from the app and stored on the device; no health records are uploaded to a server. The connection has not yet been verified on a physical iPhone.
