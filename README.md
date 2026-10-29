@@ -20,9 +20,10 @@ The profile and goal screen starts with sample values. Replace them in the app b
 
 1. Install Node.js 22.13 or later.
 2. Run `npm install`.
-3. Run `npx expo start`.
+3. Create an iOS development build with `npx eas-cli@latest build --platform ios --profile development`.
+4. Install the build on your iPhone, then run `npm start` to use Fast Refresh.
 
-This project targets Expo SDK 58. Apple Health data is read-only and requires an iOS development build plus user authorization. Expo Go does not include the required native HealthKit code.
+This project targets Expo SDK 58. Apple Health data is read-only and requires an iOS development build plus user authorization. Expo Go does not include the required native HealthKit code. The development build requires an Expo account and Apple signing setup.
 
 ## Next implementation steps
 
