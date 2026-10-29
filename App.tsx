@@ -348,8 +348,14 @@ function SettingsScreen({ latestWeight, profile, onSave }: { latestWeight: numbe
       startWeight: Number(fields.startWeight), targetWeight: Number(fields.targetWeight),
       dailyKcalTarget: Number(fields.dailyKcalTarget), targetDate: fields.targetDate,
     };
-    if (Object.values(next).some((value) => typeof value === 'number' && (!Number.isFinite(value) || value <= 0)) || !/^\d{4}-\d{2}-\d{2}$/.test(fields.targetDate)) {
-      Alert.alert('入力を確認', '数値を正しく入力し、目標日はYYYY-MM-DD形式で入力してください。');
+    const [year, month, day] = fields.targetDate.split('-').map(Number);
+    const parsedDate = new Date(year, month - 1, day);
+    const validDate = /^\d{4}-\d{2}-\d{2}$/.test(fields.targetDate)
+      && parsedDate.getFullYear() === year
+      && parsedDate.getMonth() === month - 1
+      && parsedDate.getDate() === day;
+    if (Object.values(next).some((value) => typeof value === 'number' && (!Number.isFinite(value) || value <= 0)) || !validDate || next.targetWeight >= next.startWeight) {
+      Alert.alert('入力を確認', '数値を正しく入力してください。目標日はYYYY-MM-DD形式、目標体重は開始体重より小さくしてください。');
       return;
     }
     onSave(next);
