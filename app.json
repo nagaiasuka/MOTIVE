@@ -1,0 +1,21 @@
+{
+  "expo": {
+    "name": "MOTIVE",
+    "slug": "motive-fitness-log",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "scheme": "motive",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "jp.motive.fitnesslog",
+      "infoPlist": {
+        "NSHealthShareUsageDescription": "歩数とワークアウトを読み取り、活動記録と消費カロリーの表示に使います。",
+        "NSHealthUpdateUsageDescription": "MOTIVEからヘルスケアへ記録を書き込みません。"
+      }
+    },
+    "android": {
+      "package": "jp.motive.fitnesslog"
+    }
+  }
+}
