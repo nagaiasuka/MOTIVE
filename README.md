@@ -7,6 +7,7 @@ MOTIVE is a local-first iPhone fitness and weight-management app prototype.
 - Daily weight entry and a weight trend view
 - Food and snack entries with calorie totals
 - Separate manual strength-training records
+- Apple Health steps, active energy, and workout sync (iOS development build required)
 - Estimated resting energy (BMR) plus logged active calories
 - Intake, burn, and net-energy dashboard
 - Japanese dark sports-inspired interface with orange accents
@@ -21,13 +22,12 @@ The profile and goal screen starts with sample values. Replace them in the app b
 2. Run `npm install`.
 3. Run `npx expo start`.
 
-This project targets Expo SDK 58. Use a development build for native health data access.
+This project targets Expo SDK 58. Apple Health data is read-only and requires an iOS development build plus user authorization. Expo Go does not include the required native HealthKit code.
 
 ## Next implementation steps
 
-1. Add an iOS HealthKit native module for read-only step, active-energy, and workout imports.
-2. Keep imported HealthKit workouts separate from manual strength entries and prevent duplicate calorie counting.
-3. Add searchable Japanese food entries and photo-assisted calorie estimation with a user confirmation step.
-4. Add Apple Health permission status and a data-source management screen.
+1. Add searchable Japanese food entries and photo-assisted calorie estimation with a user confirmation step.
+2. Refine HealthKit authorization states and historical sync behavior.
+3. Add stronger duplicate detection between manual and HealthKit workouts.
 
-The current prototype does not yet connect to Apple Health. It stores data only on the device and does not create an account or send records to a server.
+HealthKit reads are initiated from the app and stored on the device; no health records are uploaded to a server. The connection has not yet been verified on a physical iPhone.
