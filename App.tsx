@@ -241,8 +241,14 @@ function App() {
         }),
         queryWorkoutSamples({ limit: 0, filter: dateFilter }),
       ]);
-      const stepsByDay = new Map(stepBuckets.filter((bucket) => bucket.startDate).map((bucket) => [dateKey(bucket.startDate as Date), Math.round(bucket.sumQuantity?.quantity ?? 0)]));
-      const energyByDay = new Map(energyBuckets.filter((bucket) => bucket.startDate).map((bucket) => [dateKey(bucket.startDate as Date), Math.round(bucket.sumQuantity?.quantity ?? 0)]));
+      const stepsByDay = new Map<string, number>();
+      for (const bucket of stepBuckets) {
+        if (bucket.startDate) stepsByDay.set(dateKey(bucket.startDate), Math.round(bucket.sumQuantity?.quantity ?? 0));
+      }
+      const energyByDay = new Map<string, number>();
+      for (const bucket of energyBuckets) {
+        if (bucket.startDate) energyByDay.set(dateKey(bucket.startDate), Math.round(bucket.sumQuantity?.quantity ?? 0));
+      }
       const workoutsByDay = new Map<string, HealthWorkoutEntry[]>();
       for (const workout of workouts) {
         const key = dateKey(workout.startDate);
