@@ -10,9 +10,10 @@ MOTIVE is a local-first iPhone fitness and weight-management app prototype.
 - Estimated resting energy (BMR) plus logged active calories
 - Intake, burn, and net-energy dashboard
 - Japanese dark sports-inspired interface with orange accents
+- Editable profile and goal settings saved on the device
 - Local persistence on the device
 
-The values currently shown in the prototype are sample values. Set your own profile and goals before relying on its estimates. The BMR and exercise calorie values are estimates, not medical advice.
+The profile and goal screen starts with sample values. Replace them in the app before relying on its estimates; profile settings are stored on the device. The BMR and exercise calorie values are estimates, not medical advice.
 
 ## Run locally
 
