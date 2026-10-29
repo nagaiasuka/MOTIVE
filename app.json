@@ -16,6 +16,15 @@
     },
     "android": {
       "package": "jp.motive.fitnesslog"
-    }
+    },
+    "plugins": [
+      [
+        "@kingstinct/react-native-healthkit",
+        {
+          "NSHealthShareUsageDescription": "歩数とワークアウトを読み取り、活動記録と消費カロリーの表示に使います。",
+          "NSHealthUpdateUsageDescription": "MOTIVEからヘルスケアへ記録を書き込みません。"
+        }
+      ]
+    ]
   }
 }
