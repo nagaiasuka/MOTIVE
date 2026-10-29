@@ -32,15 +32,27 @@ type DayLog = {
   healthActiveKcal?: number;
   healthWorkouts: string[];
 };
-type AppData = { logs: Record<string, DayLog> };
+type Profile = {
+  heightCm: number;
+  ageYears: number;
+  startWeight: number;
+  targetWeight: number;
+  dailyKcalTarget: number;
+  targetDate: string;
+};
+type AppData = { logs: Record<string, DayLog>; profile?: Profile };
 type Tab = 'today' | 'record' | 'trends' | 'settings';
 type EntryModal = 'food' | 'weight' | 'strength' | null;
 
 const STORAGE_KEY = 'motive.v1.data';
-const START_WEIGHT = 80; // sample value; customize for your own use
-const TARGET_WEIGHT = 75; // sample value; customize for your own use
-const DAILY_KCAL_TARGET = 2000;
-const GOAL_DATE = new Date(2027, 5, 1); // sample date
+const DEFAULT_PROFILE: Profile = {
+  heightCm: 170,
+  ageYears: 30,
+  startWeight: 80,
+  targetWeight: 75,
+  dailyKcalTarget: 2000,
+  targetDate: '2027-06-01',
+};
 const COLORS = {
   bg: '#07111F',
   surface: '#101D2D',
@@ -69,10 +81,11 @@ const formatDate = (key: string) => {
   const [year, month, day] = key.split('-').map(Number);
   return `${month}月${day}日（${'日月火水木金土'[new Date(year, month - 1, day).getDay()]}）`;
 };
-const bmrFor = (weight: number) => Math.round(10 * weight + 6.25 * 170 - 5 * 30 + 5); // sample profile
+const bmrFor = (weight: number, profile: Profile) =>
+  Math.round(10 * weight + 6.25 * profile.heightCm - 5 * profile.ageYears + 5);
 
 function App() {
-  const [data, setData] = useState<AppData>({ logs: {} });
+  const [data, setData] = useState<AppData>({ logs: {}, profile: DEFAULT_PROFILE });
   const [ready, setReady] = useState(false);
   const [tab, setTab] = useState<Tab>('today');
   const [modal, setModal] = useState<EntryModal>(null);
@@ -86,17 +99,18 @@ function App() {
   const [strengthReps, setStrengthReps] = useState('10');
 
   const dayKey = todayKey();
+  const profile = data.profile ?? DEFAULT_PROFILE;
   const today = data.logs[dayKey] ?? blankDay();
   const latestWeight = useMemo(() => {
     const dated = Object.entries(data.logs)
       .filter(([, log]) => typeof log.weight === 'number')
       .sort(([a], [b]) => b.localeCompare(a));
-    return dated[0]?.[1].weight ?? START_WEIGHT;
-  }, [data.logs]);
+    return dated[0]?.[1].weight ?? profile.startWeight;
+  }, [data.logs, profile.startWeight]);
   const intake = today.foods.reduce((sum, item) => sum + item.kcal, 0);
   const manualStrengthKcal = today.strength.reduce((sum, item) => sum + item.kcal, 0);
   const activeKcal = (today.healthActiveKcal ?? 0) + manualStrengthKcal;
-  const bmr = bmrFor(latestWeight);
+  const bmr = bmrFor(latestWeight, profile);
   const totalBurn = bmr + activeKcal;
   const net = intake - totalBurn;
 
@@ -106,10 +120,13 @@ function App() {
       .then((stored) => {
         if (!mounted) return;
         if (stored) {
-          const parsed = JSON.parse(stored) as AppData;
-          setData(parsed);
+          const parsed = JSON.parse(stored) as Partial<AppData>;
+          setData({
+            logs: parsed.logs ?? {},
+            profile: { ...DEFAULT_PROFILE, ...(parsed.profile ?? {}) },
+          });
         } else {
-          setData({ logs: { [todayKey()]: { ...blankDay(), weight: START_WEIGHT } } });
+          setData({ logs: {}, profile: DEFAULT_PROFILE });
         }
       })
       .catch(() => Alert.alert('読み込みエラー', '保存データを読み込めませんでした。'))
@@ -187,7 +204,7 @@ function App() {
         </View>
         <View style={styles.content}>
           {tab === 'today' && <TodayScreen
-            dayKey={dayKey} latestWeight={latestWeight} intake={intake} bmr={bmr}
+            dayKey={dayKey} latestWeight={latestWeight} intake={intake} bmr={bmr} profile={profile}
             activeKcal={activeKcal} totalBurn={totalBurn} net={net} today={today}
             onAdd={(kind) => setModal(kind)} onTab={setTab}
           />}
@@ -196,8 +213,8 @@ function App() {
             onRemoveFood={removeFood} onRemoveStrength={removeStrength}
             onWeight={() => { setWeightValue(String(today.weight ?? latestWeight)); setModal('weight'); }}
           />}
-          {tab === 'trends' && <TrendsScreen data={data} latestWeight={latestWeight} />}
-          {tab === 'settings' && <SettingsScreen latestWeight={latestWeight} />}
+          {tab === 'trends' && <TrendsScreen data={data} latestWeight={latestWeight} profile={profile} />}
+          {tab === 'settings' && <SettingsScreen latestWeight={latestWeight} profile={profile} onSave={(nextProfile) => setData((current) => ({ ...current, profile: nextProfile }))} />}
         </View>
         <View style={styles.tabBar}>
           <TabButton label="今日" icon="◉" active={tab === 'today'} onPress={() => setTab('today')} />
@@ -220,13 +237,15 @@ function App() {
 }
 
 function TodayScreen(props: {
-  dayKey: string; latestWeight: number; intake: number; bmr: number; activeKcal: number;
+  dayKey: string; latestWeight: number; intake: number; bmr: number; activeKcal: number; profile: Profile;
   totalBurn: number; net: number; today: DayLog; onAdd: (kind: EntryModal) => void; onTab: (tab: Tab) => void;
 }) {
-  const daysLeft = Math.max(0, Math.ceil((GOAL_DATE.getTime() - new Date().setHours(0, 0, 0, 0)) / 86400000));
-  const kgLeft = Math.max(0, props.latestWeight - TARGET_WEIGHT);
-  const progress = Math.max(0, Math.min(1, (START_WEIGHT - props.latestWeight) / (START_WEIGHT - TARGET_WEIGHT)));
-  const calorieProgress = Math.max(0, Math.min(1, props.intake / DAILY_KCAL_TARGET));
+  const goalDate = new Date(`${props.profile.targetDate}T00:00:00`);
+  const daysLeft = Math.max(0, Math.ceil((goalDate.getTime() - new Date().setHours(0, 0, 0, 0)) / 86400000));
+  const kgLeft = Math.max(0, props.latestWeight - props.profile.targetWeight);
+  const weightRange = props.profile.startWeight - props.profile.targetWeight;
+  const progress = weightRange > 0 ? Math.max(0, Math.min(1, (props.profile.startWeight - props.latestWeight) / weightRange)) : 0;
+  const calorieProgress = Math.max(0, Math.min(1, props.intake / props.profile.dailyKcalTarget));
   return (
     <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
       <View style={styles.dateRow}>
@@ -234,13 +253,13 @@ function TodayScreen(props: {
         <View style={styles.goalPill}><Text style={styles.goalPillText}>目標まで {daysLeft}日</Text></View>
       </View>
       <View style={styles.heroCard}>
-        <View style={styles.heroTop}><View><Text style={styles.cardLabel}>現在の体重</Text><Text style={styles.bigWeight}>{props.latestWeight.toFixed(1)}<Text style={styles.unit}> kg</Text></Text></View><View style={styles.targetBadge}><Text style={styles.targetCaption}>GOAL</Text><Text style={styles.targetNumber}>75 kg</Text><Text style={styles.targetDate}>6月1日</Text></View></View>
+        <View style={styles.heroTop}><View><Text style={styles.cardLabel}>現在の体重</Text><Text style={styles.bigWeight}>{props.latestWeight.toFixed(1)}<Text style={styles.unit}> kg</Text></Text></View><View style={styles.targetBadge}><Text style={styles.targetCaption}>GOAL</Text><Text style={styles.targetNumber}>{props.profile.targetWeight} kg</Text><Text style={styles.targetDate}>{goalDate.getMonth() + 1}月{goalDate.getDate()}日</Text></View></View>
         <View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${progress * 100}%` }]} /></View>
-        <View style={styles.progressLabels}><Text style={styles.muted}>スタート {START_WEIGHT} kg</Text><Text style={styles.muted}>あと {kgLeft.toFixed(1)} kg</Text></View>
+        <View style={styles.progressLabels}><Text style={styles.muted}>スタート {props.profile.startWeight} kg</Text><Text style={styles.muted}>あと {kgLeft.toFixed(1)} kg</Text></View>
       </View>
       <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>今日のエネルギー</Text><Text style={styles.sectionHint}>推定値</Text></View>
       <View style={styles.energyCard}>
-        <View style={styles.energyHead}><Text style={styles.energyNum}>{props.intake.toLocaleString()}</Text><Text style={styles.energyUnit}> / {DAILY_KCAL_TARGET.toLocaleString()} kcal</Text><Text style={styles.energyRemaining}>残り {Math.max(0, DAILY_KCAL_TARGET - props.intake).toLocaleString()}</Text></View>
+        <View style={styles.energyHead}><Text style={styles.energyNum}>{props.intake.toLocaleString()}</Text><Text style={styles.energyUnit}> / {props.profile.dailyKcalTarget.toLocaleString()} kcal</Text><Text style={styles.energyRemaining}>残り {Math.max(0, props.profile.dailyKcalTarget - props.intake).toLocaleString()}</Text></View>
         <View style={styles.calorieTrack}><View style={[styles.calorieFill, { width: `${calorieProgress * 100}%` }]} /></View>
         <View style={styles.energyBreakdown}>
           <Metric label="摂取" value={`${props.intake.toLocaleString()} kcal`} color={COLORS.orange} />
@@ -284,14 +303,14 @@ function RecordScreen(props: {
   );
 }
 
-function TrendsScreen({ data, latestWeight }: { data: AppData; latestWeight: number }) {
+function TrendsScreen({ data, latestWeight, profile }: { data: AppData; latestWeight: number; profile: Profile }) {
   const days: { key: string; weight?: number; intake: number; burn: number }[] = [];
   for (let offset = 6; offset >= 0; offset--) {
     const date = new Date(); date.setDate(date.getDate() - offset);
     const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
     const log = data.logs[key];
     days.push({ key, weight: log?.weight, intake: log?.foods.reduce((s, f) => s + f.kcal, 0) ?? 0,
-      burn: (log ? bmrFor(log.weight ?? latestWeight) + (log.healthActiveKcal ?? 0) + log.strength.reduce((s, e) => s + e.kcal, 0) : 0) });
+      burn: (log ? bmrFor(log.weight ?? latestWeight, profile) + (log.healthActiveKcal ?? 0) + log.strength.reduce((s, e) => s + e.kcal, 0) : 0) });
   }
   const weights = Object.entries(data.logs).filter(([, log]) => typeof log.weight === 'number').sort(([a], [b]) => a.localeCompare(b)).slice(-7);
   const lastSeven = weights.map(([, log]) => log.weight as number);
@@ -299,19 +318,64 @@ function TrendsScreen({ data, latestWeight }: { data: AppData; latestWeight: num
   return (
     <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
       <Text style={styles.pageTitle}>推移</Text><Text style={styles.pageSub}>続けた記録を、変化として見る</Text>
-      <View style={styles.trendHighlight}><View><Text style={styles.cardLabel}>直近7回の体重平均</Text><Text style={styles.trendBig}>{average.toFixed(1)}<Text style={styles.unit}> kg</Text></Text></View><View style={styles.trendGoal}><Text style={styles.goalCaption}>目標</Text><Text style={styles.goalValue}>{TARGET_WEIGHT} kg</Text></View></View>
+      <View style={styles.trendHighlight}><View><Text style={styles.cardLabel}>直近7回の体重平均</Text><Text style={styles.trendBig}>{average.toFixed(1)}<Text style={styles.unit}> kg</Text></Text></View><View style={styles.trendGoal}><Text style={styles.goalCaption}>目標</Text><Text style={styles.goalValue}>{profile.targetWeight} kg</Text></View></View>
       <ChartCard title="体重" subtitle="直近7日・記録した日のみ" data={days.map((d) => ({ label: d.key.slice(5).replace('-', '/'), value: d.weight }))} color={COLORS.orange} suffix="kg" />
-      <ChartCard title="摂取カロリー" subtitle="1日目標 2,000 kcal" data={days.map((d) => ({ label: d.key.slice(5).replace('-', '/'), value: d.intake || undefined }))} color={COLORS.blue} suffix="kcal" max={2200} />
+      <ChartCard title="摂取カロリー" subtitle={`1日目標 ${profile.dailyKcalTarget.toLocaleString()} kcal`} data={days.map((d) => ({ label: d.key.slice(5).replace('-', '/'), value: d.intake || undefined }))} color={COLORS.blue} suffix="kcal" max={profile.dailyKcalTarget * 1.1} />
       <ChartCard title="推定消費カロリー" subtitle="基礎代謝 + 記録された活動" data={days.map((d) => ({ label: d.key.slice(5).replace('-', '/'), value: d.burn || undefined }))} color={COLORS.mint} suffix="kcal" />
     </ScrollView>
   );
 }
 
-function SettingsScreen({ latestWeight }: { latestWeight: number }) {
+function SettingsScreen({ latestWeight, profile, onSave }: { latestWeight: number; profile: Profile; onSave: (profile: Profile) => void }) {
+  const [fields, setFields] = useState({
+    heightCm: String(profile.heightCm),
+    ageYears: String(profile.ageYears),
+    startWeight: String(profile.startWeight),
+    targetWeight: String(profile.targetWeight),
+    dailyKcalTarget: String(profile.dailyKcalTarget),
+    targetDate: profile.targetDate,
+  });
+  useEffect(() => {
+    setFields({
+      heightCm: String(profile.heightCm), ageYears: String(profile.ageYears),
+      startWeight: String(profile.startWeight), targetWeight: String(profile.targetWeight),
+      dailyKcalTarget: String(profile.dailyKcalTarget), targetDate: profile.targetDate,
+    });
+  }, [profile]);
+  const save = () => {
+    const next: Profile = {
+      heightCm: Number(fields.heightCm), ageYears: Number(fields.ageYears),
+      startWeight: Number(fields.startWeight), targetWeight: Number(fields.targetWeight),
+      dailyKcalTarget: Number(fields.dailyKcalTarget), targetDate: fields.targetDate,
+    };
+    if (Object.values(next).some((value) => typeof value === 'number' && (!Number.isFinite(value) || value <= 0)) || !/^\d{4}-\d{2}-\d{2}$/.test(fields.targetDate)) {
+      Alert.alert('入力を確認', '数値を正しく入力し、目標日はYYYY-MM-DD形式で入力してください。');
+      return;
+    }
+    onSave(next);
+    Alert.alert('保存しました', 'プロフィールと目標を端末に保存しました。');
+  };
+  const field = (label: string, key: keyof typeof fields, keyboardType: 'decimal-pad' | 'number-pad' | 'default' = 'decimal-pad', hint?: string) => (
+    <View style={styles.profileField}>
+      <Text style={styles.inputLabel}>{label}</Text>
+      <TextInput value={fields[key]} onChangeText={(value) => setFields((current) => ({ ...current, [key]: value }))} keyboardType={keyboardType} style={styles.input} placeholderTextColor={COLORS.muted} />
+      {hint ? <Text style={styles.profileHint}>{hint}</Text> : null}
+    </View>
+  );
   return (
     <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
       <Text style={styles.pageTitle}>設定</Text><Text style={styles.pageSub}>あなたの目標とアプリの管理</Text>
-      <View style={styles.settingsCard}><SettingRow label="アプリ" value="MOTIVE" /><SettingRow label="身長" value="170 cm（サンプル）" /><SettingRow label="年齢" value="30歳（サンプル）" /><SettingRow label="開始体重" value={`${START_WEIGHT} kg`} /><SettingRow label="現在体重" value={`${latestWeight.toFixed(1)} kg`} /><SettingRow label="目標体重" value={`${TARGET_WEIGHT} kg`} /><SettingRow label="目標日" value="2027年6月1日（サンプル）" /><SettingRow label="1日の摂取目安" value={`${DAILY_KCAL_TARGET.toLocaleString()} kcal`} last /></View>
+      <View style={styles.settingsCard}>
+        <Text style={styles.infoTitle}>プロフィールと目標</Text>
+        {field('身長（cm）', 'heightCm')}
+        {field('年齢', 'ageYears', 'number-pad')}
+        {field('開始体重（kg）', 'startWeight')}
+        <SettingRow label="最新の体重記録" value={`${latestWeight.toFixed(1)} kg`} />
+        {field('目標体重（kg）', 'targetWeight')}
+        {field('目標日（YYYY-MM-DD）', 'targetDate', 'default', '例：2027-04-05')}
+        {field('1日の摂取目安（kcal）', 'dailyKcalTarget', 'number-pad')}
+        <PrimaryButton label="設定を保存" onPress={save} />
+      </View>
       <View style={styles.infoCard}><Text style={styles.infoTitle}>保存と連携</Text><Text style={styles.infoText}>記録はこの端末に保存されます。Appleヘルスケア連携は、iOS向けネイティブ機能を追加する次の段階で設定します。</Text></View>
       <View style={styles.infoCard}><Text style={styles.infoTitle}>プライバシー</Text><Text style={styles.infoText}>この試作版はアカウント作成や外部サーバーへの送信を行いません。</Text></View>
     </ScrollView>
@@ -410,9 +474,8 @@ const styles = StyleSheet.create({
   pageTitle: { color: COLORS.text, fontSize: 27, fontWeight: '800', marginTop: 8 }, pageSub: { color: COLORS.muted, fontSize: 11, marginTop: 5, marginBottom: 18 }, summaryStrip: { flexDirection: 'row', justifyContent: 'space-between', padding: 14, backgroundColor: COLORS.surface, borderRadius: 17, borderWidth: 1, borderColor: '#203149', marginBottom: 20 }, summaryLabel: { color: COLORS.muted, fontSize: 10 }, summaryValue: { color: COLORS.text, fontWeight: '800', fontSize: 13, marginTop: 6 },
   recordHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 15, marginBottom: 9 }, smallAdd: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, backgroundColor: '#39261F' }, smallAddText: { color: COLORS.orange, fontSize: 10, fontWeight: '800' }, recordCard: { backgroundColor: COLORS.surface, borderRadius: 15, borderWidth: 1, borderColor: '#203149', padding: 14 }, recordValue: { color: COLORS.text, fontSize: 19, fontWeight: '800' }, recordMeta: { color: COLORS.muted, fontSize: 10, marginTop: 5 }, listCard: { backgroundColor: COLORS.surface, borderRadius: 14, padding: 11, marginBottom: 7, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#1C2C40' }, listIcon: { width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: '#38271F' }, listMain: { flex: 1, marginLeft: 9 }, listTitle: { color: COLORS.text, fontSize: 11, fontWeight: '700' }, listMeta: { color: COLORS.muted, fontSize: 9, marginTop: 3 }, listKcal: { color: COLORS.orange, fontSize: 10, fontWeight: '800', marginHorizontal: 6 }, remove: { color: COLORS.muted, fontSize: 18, paddingHorizontal: 2 }, emptyRow: { backgroundColor: '#0D1928', borderRadius: 13, padding: 14, borderWidth: 1, borderColor: '#1A2A3E', borderStyle: 'dashed' }, emptyText: { color: COLORS.muted, fontSize: 10, textAlign: 'center' },
   trendHighlight: { backgroundColor: COLORS.surface, borderRadius: 18, padding: 17, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderColor: '#203149', marginBottom: 14 }, trendBig: { color: COLORS.text, fontSize: 31, fontWeight: '800', marginTop: 5 }, trendGoal: { alignItems: 'flex-end' }, goalCaption: { color: COLORS.muted, fontSize: 9, fontWeight: '800', letterSpacing: 1 }, goalValue: { color: COLORS.orange, fontWeight: '800', fontSize: 17, marginTop: 4 }, chartCard: { backgroundColor: COLORS.surface, borderRadius: 18, padding: 15, marginBottom: 12, borderWidth: 1, borderColor: '#203149' }, chartTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }, chartTitle: { color: COLORS.text, fontSize: 13, fontWeight: '800' }, chartSubtitle: { color: COLORS.muted, fontSize: 9, marginTop: 4 }, chartLatest: { fontSize: 12, fontWeight: '800' }, chartBars: { height: 128, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-around', paddingTop: 20, marginTop: 6, borderBottomWidth: 1, borderBottomColor: COLORS.line }, chartColumn: { alignItems: 'center', justifyContent: 'flex-end', height: 120, flex: 1 }, chartBar: { width: 13, minHeight: 4, borderRadius: 5 }, chartLabel: { color: COLORS.muted, fontSize: 8, marginTop: 6, height: 13 },
-  settingsCard: { backgroundColor: COLORS.surface, borderRadius: 17, paddingHorizontal: 14, borderWidth: 1, borderColor: '#203149' }, settingRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 13 }, settingBorder: { borderBottomWidth: 1, borderBottomColor: COLORS.line }, settingLabel: { color: COLORS.muted, fontSize: 11 }, settingValue: { color: COLORS.text, fontSize: 11, fontWeight: '700' }, infoCard: { backgroundColor: COLORS.surface, borderRadius: 16, padding: 14, marginTop: 13, borderWidth: 1, borderColor: '#203149' }, infoTitle: { color: COLORS.text, fontSize: 12, fontWeight: '800' }, infoText: { color: COLORS.muted, fontSize: 10, lineHeight: 16, marginTop: 7 },
+  settingsCard: { backgroundColor: COLORS.surface, borderRadius: 17, paddingHorizontal: 14, paddingVertical: 14, borderWidth: 1, borderColor: '#203149' }, profileField: { marginBottom: 4 }, profileHint: { color: COLORS.muted, fontSize: 9, marginTop: 4 }, settingRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 13 }, settingBorder: { borderBottomWidth: 1, borderBottomColor: COLORS.line }, settingLabel: { color: COLORS.muted, fontSize: 11 }, settingValue: { color: COLORS.text, fontSize: 11, fontWeight: '700' }, infoCard: { backgroundColor: COLORS.surface, borderRadius: 16, padding: 14, marginTop: 13, borderWidth: 1, borderColor: '#203149' }, infoTitle: { color: COLORS.text, fontSize: 12, fontWeight: '800' }, infoText: { color: COLORS.muted, fontSize: 10, lineHeight: 16, marginTop: 7 },
   modalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: '#0009' }, modalDismiss: { flex: 1 }, modalSheet: { backgroundColor: '#0D1928', borderTopLeftRadius: 25, borderTopRightRadius: 25, paddingHorizontal: 20, paddingTop: 10, paddingBottom: 30, borderTopWidth: 1, borderColor: COLORS.line }, modalHandle: { width: 38, height: 4, borderRadius: 5, alignSelf: 'center', backgroundColor: '#52647A', marginBottom: 14 }, modalTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }, modalTitle: { color: COLORS.text, fontSize: 18, fontWeight: '800' }, closeButton: { color: COLORS.muted, fontSize: 24, paddingHorizontal: 4 }, inputLabel: { color: COLORS.muted, fontSize: 10, fontWeight: '700', marginBottom: 6, marginTop: 9 }, input: { borderWidth: 1, borderColor: COLORS.line, backgroundColor: COLORS.surface, color: COLORS.text, borderRadius: 12, paddingHorizontal: 13, paddingVertical: 12, fontSize: 13 }, weightInput: { fontSize: 24, fontWeight: '800', paddingVertical: 15 }, inputRow: { flexDirection: 'row', gap: 10 }, inputHalf: { flex: 1 }, chips: { flexDirection: 'row', gap: 7, marginBottom: 3 }, chip: { paddingHorizontal: 11, paddingVertical: 7, backgroundColor: COLORS.surface, borderRadius: 15, borderWidth: 1, borderColor: COLORS.line }, chipActive: { backgroundColor: '#39261F', borderColor: COLORS.orange }, chipText: { color: COLORS.muted, fontSize: 10 }, chipTextActive: { color: COLORS.orange, fontWeight: '800' }, modalHint: { color: COLORS.muted, fontSize: 9, marginTop: 10, lineHeight: 14 }, primaryButton: { marginTop: 17, backgroundColor: COLORS.orange, paddingVertical: 14, borderRadius: 14, alignItems: 'center' }, primaryButtonText: { color: '#1B1512', fontSize: 12, fontWeight: '900' },
 });
 
 export default App;
-
