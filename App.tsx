@@ -19,6 +19,7 @@ import {
   queryStatisticsCollectionForQuantity,
   queryWorkoutSamples,
   requestAuthorization,
+  WorkoutActivityType,
 } from '@kingstinct/react-native-healthkit';
 
 type FoodEntry = { id: string; name: string; kcal: number; meal: string };
@@ -33,6 +34,7 @@ type StrengthEntry = {
 };
 type HealthWorkoutEntry = {
   id: string;
+  activityName: string;
   startDate: string;
   endDate: string;
   durationMinutes: number;
@@ -97,6 +99,20 @@ const formatDate = (key: string) => {
 };
 const bmrFor = (weight: number, profile: Profile) =>
   Math.round(10 * weight + 6.25 * profile.heightCm - 5 * profile.ageYears + 5);
+const workoutNameFor = (activityType: WorkoutActivityType) => {
+  const name = WorkoutActivityType[activityType] ?? '';
+  const labels: Record<string, string> = {
+    traditionalStrengthTraining: '筋力トレーニング',
+    functionalStrengthTraining: '筋力トレーニング',
+    walking: 'ウォーキング',
+    running: 'ランニング',
+    cycling: 'サイクリング',
+    hiking: 'ハイキング',
+    swimming: '水泳',
+    yoga: 'ヨガ',
+  };
+  return labels[name] ?? 'ワークアウト';
+};
 
 function App() {
   const [data, setData] = useState<AppData>({ logs: {}, profile: DEFAULT_PROFILE });
@@ -255,6 +271,7 @@ function App() {
         const items = workoutsByDay.get(key) ?? [];
         items.push({
           id: workout.uuid,
+          activityName: workoutNameFor(workout.workoutActivityType),
           startDate: workout.startDate.toISOString(),
           endDate: workout.endDate.toISOString(),
           durationMinutes: Math.round(workout.duration.quantity / 60),
@@ -412,7 +429,7 @@ function RecordScreen(props: {
       {props.today.healthWorkouts.length === 0 ? <EmptyRow text="ヘルスケアから取得した運動はありません" /> : props.today.healthWorkouts.map((workout) => (
         <View key={workout.id} style={styles.listCard}>
           <View style={[styles.listIcon, { backgroundColor: '#38233A' }]}><Text style={{ color: '#D59AFB' }}>♥</Text></View>
-          <View style={styles.listMain}><Text style={styles.listTitle}>ワークアウト</Text><Text style={styles.listMeta}>{new Date(workout.startDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ・ {workout.durationMinutes}分</Text></View>
+          <View style={styles.listMain}><Text style={styles.listTitle}>{workout.activityName}</Text><Text style={styles.listMeta}>{new Date(workout.startDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ・ {workout.durationMinutes}分</Text></View>
         </View>
       ))}
     </ScrollView>
