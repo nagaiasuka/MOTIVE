@@ -14,7 +14,9 @@
     "expo-status-bar": "~3.0.9",
     "react": "19.3.0",
     "react-native": "0.88.0",
-    "react-native-safe-area-context": "~5.6.0"
+    "@kingstinct/react-native-healthkit": "^16.2.0",
+    "react-native-safe-area-context": "~5.6.0",
+    "react-native-nitro-modules": "^0.35.0"
   },
   "devDependencies": {
     "@types/react": "~19.2.0",
