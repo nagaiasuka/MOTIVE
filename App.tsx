@@ -33,6 +33,10 @@ const FOOD_CATALOG: CatalogFood[] = [
   { id: 'tofu-firm', name: '木綿豆腐', kcalPer100g: 73 },
   { id: 'egg-whole-raw', name: '鶏卵（全卵・生）', kcalPer100g: 142 },
   { id: 'apple-skin-raw', name: 'りんご（皮つき・生）', kcalPer100g: 56 },
+  { id: 'salmon-white-raw', name: 'しろさけ（生）', kcalPer100g: 124 },
+  { id: 'bread-sliced', name: '食パン（角形）', kcalPer100g: 248 },
+  { id: 'milk-whole', name: '普通牛乳', kcalPer100g: 61 },
+  { id: 'natto-stringy', name: '糸引き納豆', kcalPer100g: 184 },
 ];
 type StrengthEntry = {
   id: string;
@@ -578,7 +582,7 @@ function EntryDialog(props: {
           <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           {props.modal === 'food' && <>
             <Text style={styles.inputLabel}>食事区分</Text><View style={styles.chips}>{['朝食', '昼食', '夕食', '間食'].map((item) => <Pressable key={item} onPress={() => props.setFoodMeal(item)} style={[styles.chip, props.foodMeal === item && styles.chipActive]}><Text style={[styles.chipText, props.foodMeal === item && styles.chipTextActive]}>{item}</Text></Pressable>)}</View>
-            <Text style={styles.inputLabel}>食品を検索（文科省データ）</Text><TextInput value={props.foodSearch} onChangeText={props.setFoodSearch} placeholder="例：ご飯、鶏むね肉" placeholderTextColor={COLORS.muted} style={styles.input} />
+            <Text style={styles.inputLabel}>食品を検索（文科省の収載食品）</Text><TextInput value={props.foodSearch} onChangeText={props.setFoodSearch} placeholder="例：ご飯、鶏むね肉" placeholderTextColor={COLORS.muted} style={styles.input} />
             <View style={styles.foodResults}>{foodMatches.map((item) => <Pressable key={item.id} onPress={() => props.onSelectCatalogFood(item)} style={styles.foodResult}><Text style={styles.foodResultName}>{item.name}</Text><Text style={styles.foodResultKcal}>{item.kcalPer100g} kcal / 100g</Text></Pressable>)}{foodMatches.length === 0 ? <Text style={styles.modalHint}>候補がありません。下の食品名とカロリーを手入力できます。</Text> : null}</View>
             <Text style={styles.inputLabel}>食品名（手入力・編集可）</Text><TextInput value={props.foodName} onChangeText={props.setFoodName} placeholder="例：鶏むね肉、ご飯" placeholderTextColor={COLORS.muted} style={styles.input} />
             <View style={styles.inputRow}><View style={styles.inputHalf}><Text style={styles.inputLabel}>量（g）</Text><TextInput value={props.foodGrams} onChangeText={props.onFoodGramsChange} placeholder="100" placeholderTextColor={COLORS.muted} keyboardType="decimal-pad" style={styles.input} /></View><View style={styles.inputHalf}><Text style={styles.inputLabel}>カロリー（kcal）</Text><TextInput value={props.foodKcal} onChangeText={props.setFoodKcal} placeholder="例：320" placeholderTextColor={COLORS.muted} keyboardType="decimal-pad" style={styles.input} /></View></View>
