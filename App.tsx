@@ -14,6 +14,12 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import {
+  isHealthDataAvailable,
+  queryStatisticsCollectionForQuantity,
+  queryWorkoutSamples,
+  requestAuthorization,
+} from '@kingstinct/react-native-healthkit';
 
 type FoodEntry = { id: string; name: string; kcal: number; meal: string };
 type StrengthEntry = {
@@ -23,6 +29,13 @@ type StrengthEntry = {
   sets: number;
   reps: number;
   kcal: number;
+  alsoInHealth: boolean;
+};
+type HealthWorkoutEntry = {
+  id: string;
+  startDate: string;
+  endDate: string;
+  durationMinutes: number;
 };
 type DayLog = {
   weight?: number;
@@ -30,7 +43,8 @@ type DayLog = {
   strength: StrengthEntry[];
   healthSteps?: number;
   healthActiveKcal?: number;
-  healthWorkouts: string[];
+  healthSyncedAt?: string;
+  healthWorkouts: HealthWorkoutEntry[];
 };
 type Profile = {
   heightCm: number;
@@ -67,10 +81,10 @@ const COLORS = {
   red: '#FF7D82',
 };
 
-const todayKey = () => {
-  const now = new Date();
+const dateKey = (now: Date) => {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 };
+const todayKey = () => dateKey(new Date());
 const blankDay = (): DayLog => ({ foods: [], strength: [], healthWorkouts: [] });
 const newId = () => `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 const num = (value: string, fallback = 0) => {
@@ -97,6 +111,8 @@ function App() {
   const [strengthMinutes, setStrengthMinutes] = useState('30');
   const [strengthSets, setStrengthSets] = useState('3');
   const [strengthReps, setStrengthReps] = useState('10');
+  const [strengthAlsoInHealth, setStrengthAlsoInHealth] = useState(false);
+  const [healthSyncing, setHealthSyncing] = useState(false);
 
   const dayKey = todayKey();
   const profile = data.profile ?? DEFAULT_PROFILE;
@@ -108,7 +124,7 @@ function App() {
     return dated[0]?.[1].weight ?? profile.startWeight;
   }, [data.logs, profile.startWeight]);
   const intake = today.foods.reduce((sum, item) => sum + item.kcal, 0);
-  const manualStrengthKcal = today.strength.reduce((sum, item) => sum + item.kcal, 0);
+  const manualStrengthKcal = today.strength.reduce((sum, item) => sum + (item.alsoInHealth ? 0 : item.kcal), 0);
   const activeKcal = (today.healthActiveKcal ?? 0) + manualStrengthKcal;
   const bmr = bmrFor(latestWeight, profile);
   const totalBurn = bmr + activeKcal;
@@ -150,6 +166,7 @@ function App() {
   const closeModal = () => {
     setModal(null);
     setFoodName(''); setFoodKcal(''); setWeightValue(''); setStrengthName('');
+    setStrengthAlsoInHealth(false);
   };
 
   const saveFood = () => {
@@ -183,9 +200,92 @@ function App() {
     const entry: StrengthEntry = {
       id: newId(), name: strengthName.trim(), minutes, kcal,
       sets: Math.max(1, num(strengthSets, 3)), reps: Math.max(1, num(strengthReps, 10)),
+      alsoInHealth: strengthAlsoInHealth,
     };
     updateToday({ strength: [...today.strength, entry] });
     closeModal();
+  };
+
+  const syncAppleHealth = async () => {
+    if (Platform.OS !== 'ios') {
+      Alert.alert('iPhoneで利用できます', 'Appleヘルスケアとの同期はiOS版で行えます。');
+      return;
+    }
+    setHealthSyncing(true);
+    try {
+      if (!isHealthDataAvailable()) {
+        Alert.alert('ヘルスケアを利用できません', 'この端末ではAppleヘルスケアを利用できません。');
+        return;
+      }
+      await requestAuthorization({
+        toRead: [
+          'HKQuantityTypeIdentifierStepCount',
+          'HKQuantityTypeIdentifierActiveEnergyBurned',
+          'HKWorkoutTypeIdentifier',
+        ],
+      });
+      const now = new Date();
+      const anchorDate = new Date(now);
+      anchorDate.setHours(0, 0, 0, 0);
+      const startDate = new Date(anchorDate);
+      startDate.setDate(startDate.getDate() - 6);
+      const dateFilter = { date: { startDate, endDate: now } };
+      const [stepBuckets, energyBuckets, workouts] = await Promise.all([
+        queryStatisticsCollectionForQuantity('HKQuantityTypeIdentifierStepCount', ['cumulativeSum'], anchorDate, { day: 1 }, {
+          filter: dateFilter,
+          unit: 'count',
+        }),
+        queryStatisticsCollectionForQuantity('HKQuantityTypeIdentifierActiveEnergyBurned', ['cumulativeSum'], anchorDate, { day: 1 }, {
+          filter: dateFilter,
+          unit: 'kcal',
+        }),
+        queryWorkoutSamples({ limit: 0, filter: dateFilter }),
+      ]);
+      const stepsByDay = new Map(stepBuckets.filter((bucket) => bucket.startDate).map((bucket) => [dateKey(bucket.startDate as Date), Math.round(bucket.sumQuantity?.quantity ?? 0)]));
+      const energyByDay = new Map(energyBuckets.filter((bucket) => bucket.startDate).map((bucket) => [dateKey(bucket.startDate as Date), Math.round(bucket.sumQuantity?.quantity ?? 0)]));
+      const workoutsByDay = new Map<string, HealthWorkoutEntry[]>();
+      for (const workout of workouts) {
+        const key = dateKey(workout.startDate);
+        const items = workoutsByDay.get(key) ?? [];
+        items.push({
+          id: workout.uuid,
+          startDate: workout.startDate.toISOString(),
+          endDate: workout.endDate.toISOString(),
+          durationMinutes: Math.round(workout.duration.quantity / 60),
+        });
+        workoutsByDay.set(key, items);
+      }
+      const syncedDays = Array.from({ length: 7 }, (_, index) => {
+        const date = new Date(startDate);
+        date.setDate(date.getDate() + index);
+        return dateKey(date);
+      });
+      setData((current) => {
+        const logs = { ...current.logs };
+        for (const key of syncedDays) {
+          logs[key] = {
+            ...blankDay(),
+            ...(logs[key] ?? {}),
+            healthSteps: stepsByDay.get(key) ?? 0,
+            healthActiveKcal: energyByDay.get(key) ?? 0,
+            healthSyncedAt: now.toISOString(),
+            healthWorkouts: workoutsByDay.get(key) ?? [],
+          };
+        }
+        return { ...current, logs };
+      });
+      const todaySteps = stepsByDay.get(dayKey) ?? 0;
+      if (stepBuckets.length === 0 && energyBuckets.length === 0 && workouts.length === 0) {
+        Alert.alert('同期しましたがデータはありません', '対象期間の記録がないか、ヘルスケアの読み取りが許可されていない可能性があります。「設定」→「ヘルスケア」からMOTIVEのアクセスを確認してください。');
+      } else {
+        Alert.alert('過去7日分を同期しました', `今日の歩数 ${todaySteps.toLocaleString()}歩、ワークアウト ${workouts.length}件を取得しました。`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '同期に失敗しました。';
+      Alert.alert('同期できませんでした', `${message}\n\niPhoneの「設定」→「ヘルスケア」からMOTIVEのアクセスを確認してください。`);
+    } finally {
+      setHealthSyncing(false);
+    }
   };
 
   const removeFood = (id: string) => updateToday({ foods: today.foods.filter((item) => item.id !== id) });
@@ -206,11 +306,12 @@ function App() {
           {tab === 'today' && <TodayScreen
             dayKey={dayKey} latestWeight={latestWeight} intake={intake} bmr={bmr} profile={profile}
             activeKcal={activeKcal} totalBurn={totalBurn} net={net} today={today}
-            onAdd={(kind) => setModal(kind)} onTab={setTab}
+            onAdd={(kind) => setModal(kind)} onTab={setTab} onSyncHealth={syncAppleHealth}
+            healthSyncing={healthSyncing}
           />}
           {tab === 'record' && <RecordScreen
             dayKey={dayKey} today={today} intake={intake} onAdd={(kind) => setModal(kind)}
-            onRemoveFood={removeFood} onRemoveStrength={removeStrength}
+            onRemoveFood={removeFood} onRemoveStrength={removeStrength} onSyncHealth={syncAppleHealth}
             onWeight={() => { setWeightValue(String(today.weight ?? latestWeight)); setModal('weight'); }}
           />}
           {tab === 'trends' && <TrendsScreen data={data} latestWeight={latestWeight} profile={profile} />}
@@ -230,6 +331,7 @@ function App() {
           setStrengthName={setStrengthName} strengthMinutes={strengthMinutes}
           setStrengthMinutes={setStrengthMinutes} strengthSets={strengthSets} setStrengthSets={setStrengthSets}
           strengthReps={strengthReps} setStrengthReps={setStrengthReps} latestWeight={latestWeight}
+          strengthAlsoInHealth={strengthAlsoInHealth} setStrengthAlsoInHealth={setStrengthAlsoInHealth}
         />
       </SafeAreaView>
     </SafeAreaProvider>
@@ -239,6 +341,7 @@ function App() {
 function TodayScreen(props: {
   dayKey: string; latestWeight: number; intake: number; bmr: number; activeKcal: number; profile: Profile;
   totalBurn: number; net: number; today: DayLog; onAdd: (kind: EntryModal) => void; onTab: (tab: Tab) => void;
+  onSyncHealth: () => void; healthSyncing: boolean;
 }) {
   const goalDate = new Date(`${props.profile.targetDate}T00:00:00`);
   const daysLeft = Math.max(0, Math.ceil((goalDate.getTime() - new Date().setHours(0, 0, 0, 0)) / 86400000));
@@ -274,11 +377,11 @@ function TodayScreen(props: {
         <QuickAction icon="⚖" label="体重" color={COLORS.blue} onPress={() => props.onAdd('weight')} />
         <QuickAction icon="↗" label="筋トレ" color={COLORS.mint} onPress={() => props.onAdd('strength')} />
       </View>
-      <View style={styles.sourceCard}>
+      <Pressable style={styles.sourceCard} onPress={props.onSyncHealth} disabled={props.healthSyncing}>
         <View style={styles.sourceIcon}><Text style={styles.sourceIconText}>♥</Text></View>
-        <View style={styles.sourceCopy}><Text style={styles.sourceTitle}>Appleヘルスケア</Text><Text style={styles.sourceDesc}>歩数・ワークアウト連携の準備中</Text></View>
-        <View style={styles.statusDot} /><Text style={styles.statusText}>未接続</Text>
-      </View>
+        <View style={styles.sourceCopy}><Text style={styles.sourceTitle}>Appleヘルスケア</Text><Text style={styles.sourceDesc}>歩数 {props.today.healthSteps?.toLocaleString() ?? '—'}歩 ・ 活動 {props.today.healthActiveKcal?.toLocaleString() ?? '—'} kcal</Text></View>
+        <View style={[styles.statusDot, props.today.healthSyncedAt && { backgroundColor: COLORS.mint }]} /><Text style={styles.statusText}>{props.healthSyncing ? '同期中' : props.today.healthSyncedAt ? '同期' : '接続'}</Text>
+      </Pressable>
       <Text style={styles.footnote}>消費カロリーと運動の数値は目安です。実際の記録は「記録」画面で追加できます。</Text>
     </ScrollView>
   );
@@ -286,7 +389,7 @@ function TodayScreen(props: {
 
 function RecordScreen(props: {
   dayKey: string; today: DayLog; intake: number; onAdd: (kind: EntryModal) => void;
-  onRemoveFood: (id: string) => void; onRemoveStrength: (id: string) => void; onWeight: () => void;
+  onRemoveFood: (id: string) => void; onRemoveStrength: (id: string) => void; onWeight: () => void; onSyncHealth: () => void;
 }) {
   return (
     <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -297,20 +400,28 @@ function RecordScreen(props: {
       <View style={styles.recordHeading}><Text style={styles.sectionTitle}>食事・間食</Text><Pressable style={styles.smallAdd} onPress={() => props.onAdd('food')}><Text style={styles.smallAddText}>＋ 追加</Text></Pressable></View>
       {props.today.foods.length === 0 ? <EmptyRow text="食事の記録はまだありません" /> : props.today.foods.map((food) => <View key={food.id} style={styles.listCard}><View style={styles.listIcon}><Text>●</Text></View><View style={styles.listMain}><Text style={styles.listTitle}>{food.name}</Text><Text style={styles.listMeta}>{food.meal}</Text></View><Text style={styles.listKcal}>{food.kcal} kcal</Text><Pressable onPress={() => props.onRemoveFood(food.id)} hitSlop={10}><Text style={styles.remove}>×</Text></Pressable></View>)}
       <View style={styles.recordHeading}><Text style={styles.sectionTitle}>筋トレ（手入力）</Text><Pressable style={styles.smallAdd} onPress={() => props.onAdd('strength')}><Text style={styles.smallAddText}>＋ 追加</Text></Pressable></View>
-      {props.today.strength.length === 0 ? <EmptyRow text="ヘルスケアの運動とは別に記録します" /> : props.today.strength.map((workout) => <View key={workout.id} style={styles.listCard}><View style={[styles.listIcon, { backgroundColor: '#10352F' }]}><Text style={{ color: COLORS.mint }}>↗</Text></View><View style={styles.listMain}><Text style={styles.listTitle}>{workout.name}</Text><Text style={styles.listMeta}>{workout.sets}セット × {workout.reps}回 ・ {workout.minutes}分</Text></View><Text style={[styles.listKcal, { color: COLORS.mint }]}>~{workout.kcal} kcal</Text><Pressable onPress={() => props.onRemoveStrength(workout.id)} hitSlop={10}><Text style={styles.remove}>×</Text></Pressable></View>)}
-      <Text style={styles.footnote}>筋トレの消費カロリーは時間からの概算です。ヘルスケア記録とは別に管理します。</Text>
+      {props.today.strength.length === 0 ? <EmptyRow text="ヘルスケアの運動とは別に記録します" /> : props.today.strength.map((workout) => <View key={workout.id} style={styles.listCard}><View style={[styles.listIcon, { backgroundColor: '#10352F' }]}><Text style={{ color: COLORS.mint }}>↗</Text></View><View style={styles.listMain}><Text style={styles.listTitle}>{workout.name}</Text><Text style={styles.listMeta}>{workout.sets}セット × {workout.reps}回 ・ {workout.minutes}分{workout.alsoInHealth ? ' ・ 重複除外' : ''}</Text></View><Text style={[styles.listKcal, { color: COLORS.mint }]}>~{workout.kcal} kcal</Text><Pressable onPress={() => props.onRemoveStrength(workout.id)} hitSlop={10}><Text style={styles.remove}>×</Text></Pressable></View>)}
+      <Text style={styles.footnote}>筋トレの消費カロリーは時間からの概算です。Appleヘルスケアにも同じ運動がある場合は、登録時に重複計上を避けられます。</Text>
+      <View style={styles.recordHeading}><Text style={styles.sectionTitle}>Appleヘルスケアの運動</Text><Pressable style={styles.smallAdd} onPress={props.onSyncHealth}><Text style={styles.smallAddText}>同期</Text></Pressable></View>
+      {props.today.healthWorkouts.length === 0 ? <EmptyRow text="ヘルスケアから取得した運動はありません" /> : props.today.healthWorkouts.map((workout) => (
+        <View key={workout.id} style={styles.listCard}>
+          <View style={[styles.listIcon, { backgroundColor: '#38233A' }]}><Text style={{ color: '#D59AFB' }}>♥</Text></View>
+          <View style={styles.listMain}><Text style={styles.listTitle}>ワークアウト</Text><Text style={styles.listMeta}>{new Date(workout.startDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ・ {workout.durationMinutes}分</Text></View>
+        </View>
+      ))}
     </ScrollView>
   );
 }
 
 function TrendsScreen({ data, latestWeight, profile }: { data: AppData; latestWeight: number; profile: Profile }) {
-  const days: { key: string; weight?: number; intake: number; burn: number }[] = [];
+  const days: { key: string; weight?: number; intake: number; burn: number; steps?: number }[] = [];
   for (let offset = 6; offset >= 0; offset--) {
     const date = new Date(); date.setDate(date.getDate() - offset);
     const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
     const log = data.logs[key];
     days.push({ key, weight: log?.weight, intake: log?.foods.reduce((s, f) => s + f.kcal, 0) ?? 0,
-      burn: (log ? bmrFor(log.weight ?? latestWeight, profile) + (log.healthActiveKcal ?? 0) + log.strength.reduce((s, e) => s + e.kcal, 0) : 0) });
+      burn: (log ? bmrFor(log.weight ?? latestWeight, profile) + (log.healthActiveKcal ?? 0) + log.strength.filter((e) => !e.alsoInHealth).reduce((s, e) => s + e.kcal, 0) : 0),
+      steps: log?.healthSteps });
   }
   const weights = Object.entries(data.logs).filter(([, log]) => typeof log.weight === 'number').sort(([a], [b]) => a.localeCompare(b)).slice(-7);
   const lastSeven = weights.map(([, log]) => log.weight as number);
@@ -322,6 +433,7 @@ function TrendsScreen({ data, latestWeight, profile }: { data: AppData; latestWe
       <ChartCard title="体重" subtitle="直近7日・記録した日のみ" data={days.map((d) => ({ label: d.key.slice(5).replace('-', '/'), value: d.weight }))} color={COLORS.orange} suffix="kg" />
       <ChartCard title="摂取カロリー" subtitle={`1日目標 ${profile.dailyKcalTarget.toLocaleString()} kcal`} data={days.map((d) => ({ label: d.key.slice(5).replace('-', '/'), value: d.intake || undefined }))} color={COLORS.blue} suffix="kcal" max={profile.dailyKcalTarget * 1.1} />
       <ChartCard title="推定消費カロリー" subtitle="基礎代謝 + 記録された活動" data={days.map((d) => ({ label: d.key.slice(5).replace('-', '/'), value: d.burn || undefined }))} color={COLORS.mint} suffix="kcal" />
+      <ChartCard title="歩数" subtitle="Appleヘルスケアから取得" data={days.map((d) => ({ label: d.key.slice(5).replace('-', '/'), value: d.steps }))} color={COLORS.yellow} suffix="歩" />
     </ScrollView>
   );
 }
@@ -382,7 +494,7 @@ function SettingsScreen({ latestWeight, profile, onSave }: { latestWeight: numbe
         {field('1日の摂取目安（kcal）', 'dailyKcalTarget', 'number-pad')}
         <PrimaryButton label="設定を保存" onPress={save} />
       </View>
-      <View style={styles.infoCard}><Text style={styles.infoTitle}>保存と連携</Text><Text style={styles.infoText}>記録はこの端末に保存されます。Appleヘルスケア連携は、iOS向けネイティブ機能を追加する次の段階で設定します。</Text></View>
+      <View style={styles.infoCard}><Text style={styles.infoTitle}>保存と連携</Text><Text style={styles.infoText}>記録とプロフィールはこの端末に保存します。今日の画面からAppleヘルスケアの歩数・活動エネルギー・ワークアウトを読み取りできます。読み取りにはiPhone用の開発ビルドとアクセス許可が必要です。</Text></View>
       <View style={styles.infoCard}><Text style={styles.infoTitle}>プライバシー</Text><Text style={styles.infoText}>この試作版はアカウント作成や外部サーバーへの送信を行いません。</Text></View>
     </ScrollView>
   );
@@ -408,6 +520,7 @@ function EntryDialog(props: {
   foodMeal: string; setFoodMeal: (value: string) => void; weightValue: string; setWeightValue: (value: string) => void;
   strengthName: string; setStrengthName: (value: string) => void; strengthMinutes: string; setStrengthMinutes: (value: string) => void;
   strengthSets: string; setStrengthSets: (value: string) => void; strengthReps: string; setStrengthReps: (value: string) => void;
+  strengthAlsoInHealth: boolean; setStrengthAlsoInHealth: (value: boolean) => void;
   latestWeight: number;
 }) {
   const visible = Boolean(props.modal);
@@ -433,6 +546,10 @@ function EntryDialog(props: {
             <Text style={styles.inputLabel}>種目名</Text><TextInput value={props.strengthName} onChangeText={props.setStrengthName} placeholder="例：ベンチプレス" placeholderTextColor={COLORS.muted} style={styles.input} />
             <View style={styles.inputRow}><View style={styles.inputHalf}><Text style={styles.inputLabel}>セット</Text><TextInput value={props.strengthSets} onChangeText={props.setStrengthSets} keyboardType="number-pad" style={styles.input} /></View><View style={styles.inputHalf}><Text style={styles.inputLabel}>1セットの回数</Text><TextInput value={props.strengthReps} onChangeText={props.setStrengthReps} keyboardType="number-pad" style={styles.input} /></View></View>
             <Text style={styles.inputLabel}>運動時間（分）</Text><TextInput value={props.strengthMinutes} onChangeText={props.setStrengthMinutes} keyboardType="number-pad" style={styles.input} />
+            <Pressable style={styles.duplicateRow} onPress={() => props.setStrengthAlsoInHealth(!props.strengthAlsoInHealth)}>
+              <View style={[styles.checkbox, props.strengthAlsoInHealth && styles.checkboxActive]}>{props.strengthAlsoInHealth ? <Text style={styles.checkboxMark}>✓</Text> : null}</View>
+              <Text style={styles.duplicateText}>同じ運動をAppleヘルスケアにも記録した</Text>
+            </Pressable>
             <Text style={styles.modalHint}>消費カロリーは体重と時間からの大まかな推定です。</Text><PrimaryButton label="筋トレを保存" onPress={props.onSaveStrength} />
           </>}
         </View>
@@ -482,6 +599,7 @@ const styles = StyleSheet.create({
   trendHighlight: { backgroundColor: COLORS.surface, borderRadius: 18, padding: 17, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderColor: '#203149', marginBottom: 14 }, trendBig: { color: COLORS.text, fontSize: 31, fontWeight: '800', marginTop: 5 }, trendGoal: { alignItems: 'flex-end' }, goalCaption: { color: COLORS.muted, fontSize: 9, fontWeight: '800', letterSpacing: 1 }, goalValue: { color: COLORS.orange, fontWeight: '800', fontSize: 17, marginTop: 4 }, chartCard: { backgroundColor: COLORS.surface, borderRadius: 18, padding: 15, marginBottom: 12, borderWidth: 1, borderColor: '#203149' }, chartTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }, chartTitle: { color: COLORS.text, fontSize: 13, fontWeight: '800' }, chartSubtitle: { color: COLORS.muted, fontSize: 9, marginTop: 4 }, chartLatest: { fontSize: 12, fontWeight: '800' }, chartBars: { height: 128, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-around', paddingTop: 20, marginTop: 6, borderBottomWidth: 1, borderBottomColor: COLORS.line }, chartColumn: { alignItems: 'center', justifyContent: 'flex-end', height: 120, flex: 1 }, chartBar: { width: 13, minHeight: 4, borderRadius: 5 }, chartLabel: { color: COLORS.muted, fontSize: 8, marginTop: 6, height: 13 },
   settingsCard: { backgroundColor: COLORS.surface, borderRadius: 17, paddingHorizontal: 14, paddingVertical: 14, borderWidth: 1, borderColor: '#203149' }, profileField: { marginBottom: 4 }, profileHint: { color: COLORS.muted, fontSize: 9, marginTop: 4 }, settingRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 13 }, settingBorder: { borderBottomWidth: 1, borderBottomColor: COLORS.line }, settingLabel: { color: COLORS.muted, fontSize: 11 }, settingValue: { color: COLORS.text, fontSize: 11, fontWeight: '700' }, infoCard: { backgroundColor: COLORS.surface, borderRadius: 16, padding: 14, marginTop: 13, borderWidth: 1, borderColor: '#203149' }, infoTitle: { color: COLORS.text, fontSize: 12, fontWeight: '800' }, infoText: { color: COLORS.muted, fontSize: 10, lineHeight: 16, marginTop: 7 },
   modalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: '#0009' }, modalDismiss: { flex: 1 }, modalSheet: { backgroundColor: '#0D1928', borderTopLeftRadius: 25, borderTopRightRadius: 25, paddingHorizontal: 20, paddingTop: 10, paddingBottom: 30, borderTopWidth: 1, borderColor: COLORS.line }, modalHandle: { width: 38, height: 4, borderRadius: 5, alignSelf: 'center', backgroundColor: '#52647A', marginBottom: 14 }, modalTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }, modalTitle: { color: COLORS.text, fontSize: 18, fontWeight: '800' }, closeButton: { color: COLORS.muted, fontSize: 24, paddingHorizontal: 4 }, inputLabel: { color: COLORS.muted, fontSize: 10, fontWeight: '700', marginBottom: 6, marginTop: 9 }, input: { borderWidth: 1, borderColor: COLORS.line, backgroundColor: COLORS.surface, color: COLORS.text, borderRadius: 12, paddingHorizontal: 13, paddingVertical: 12, fontSize: 13 }, weightInput: { fontSize: 24, fontWeight: '800', paddingVertical: 15 }, inputRow: { flexDirection: 'row', gap: 10 }, inputHalf: { flex: 1 }, chips: { flexDirection: 'row', gap: 7, marginBottom: 3 }, chip: { paddingHorizontal: 11, paddingVertical: 7, backgroundColor: COLORS.surface, borderRadius: 15, borderWidth: 1, borderColor: COLORS.line }, chipActive: { backgroundColor: '#39261F', borderColor: COLORS.orange }, chipText: { color: COLORS.muted, fontSize: 10 }, chipTextActive: { color: COLORS.orange, fontWeight: '800' }, modalHint: { color: COLORS.muted, fontSize: 9, marginTop: 10, lineHeight: 14 }, primaryButton: { marginTop: 17, backgroundColor: COLORS.orange, paddingVertical: 14, borderRadius: 14, alignItems: 'center' }, primaryButtonText: { color: '#1B1512', fontSize: 12, fontWeight: '900' },
+  duplicateRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12, paddingVertical: 7 }, checkbox: { width: 20, height: 20, borderRadius: 5, borderWidth: 1, borderColor: COLORS.muted, alignItems: 'center', justifyContent: 'center', marginRight: 9 }, checkboxActive: { backgroundColor: COLORS.mint, borderColor: COLORS.mint }, checkboxMark: { color: COLORS.bg, fontSize: 13, fontWeight: '900' }, duplicateText: { color: COLORS.text, fontSize: 10, flex: 1 },
 });
 
 export default App;
