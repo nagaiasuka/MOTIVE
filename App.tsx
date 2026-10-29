@@ -22,7 +22,18 @@ import {
   WorkoutActivityType,
 } from '@kingstinct/react-native-healthkit';
 
-type FoodEntry = { id: string; name: string; kcal: number; meal: string };
+type FoodEntry = { id: string; name: string; kcal: number; meal: string; quantityGrams?: number };
+type CatalogFood = { id: string; name: string; kcalPer100g: number };
+
+// Energy values per edible 100 g, sourced from the MEXT Standard Tables of Food Composition in Japan (2023 supplement).
+const FOOD_CATALOG: CatalogFood[] = [
+  { id: 'rice-cooked', name: 'ご飯（精白米・炊飯）', kcalPer100g: 156 },
+  { id: 'chicken-breast-raw', name: '鶏むね肉（皮なし・生）', kcalPer100g: 113 },
+  { id: 'banana-raw', name: 'バナナ（生）', kcalPer100g: 93 },
+  { id: 'tofu-firm', name: '木綿豆腐', kcalPer100g: 73 },
+  { id: 'egg-whole-raw', name: '鶏卵（全卵・生）', kcalPer100g: 142 },
+  { id: 'apple-skin-raw', name: 'りんご（皮つき・生）', kcalPer100g: 56 },
+];
 type StrengthEntry = {
   id: string;
   name: string;
@@ -122,6 +133,9 @@ function App() {
   const [foodName, setFoodName] = useState('');
   const [foodKcal, setFoodKcal] = useState('');
   const [foodMeal, setFoodMeal] = useState('昼食');
+  const [foodSearch, setFoodSearch] = useState('');
+  const [foodGrams, setFoodGrams] = useState('100');
+  const [selectedCatalogFood, setSelectedCatalogFood] = useState<CatalogFood | null>(null);
   const [weightValue, setWeightValue] = useState('');
   const [strengthName, setStrengthName] = useState('');
   const [strengthMinutes, setStrengthMinutes] = useState('30');
@@ -181,7 +195,7 @@ function App() {
 
   const closeModal = () => {
     setModal(null);
-    setFoodName(''); setFoodKcal(''); setWeightValue(''); setStrengthName('');
+    setFoodName(''); setFoodKcal(''); setFoodSearch(''); setFoodGrams('100'); setSelectedCatalogFood(null); setWeightValue(''); setStrengthName('');
     setStrengthAlsoInHealth(false);
   };
 
@@ -191,7 +205,7 @@ function App() {
       Alert.alert('入力を確認', '食品名とカロリーを入力してください。');
       return;
     }
-    updateToday({ foods: [...today.foods, { id: newId(), name: foodName.trim(), kcal, meal: foodMeal }] });
+    updateToday({ foods: [...today.foods, { id: newId(), name: foodName.trim(), kcal, meal: foodMeal, ...(selectedCatalogFood ? { quantityGrams: num(foodGrams, 100) } : {}) }] });
     closeModal();
   };
 
@@ -350,6 +364,9 @@ function App() {
           modal={modal} onClose={closeModal} onSaveFood={saveFood} onSaveWeight={saveWeight}
           onSaveStrength={saveStrength} foodName={foodName} setFoodName={setFoodName}
           foodKcal={foodKcal} setFoodKcal={setFoodKcal} foodMeal={foodMeal} setFoodMeal={setFoodMeal}
+          foodSearch={foodSearch} setFoodSearch={setFoodSearch} foodGrams={foodGrams}
+          onFoodGramsChange={(value) => { setFoodGrams(value); if (selectedCatalogFood) setFoodKcal(String(Math.round(selectedCatalogFood.kcalPer100g * num(value, 0) / 100))); }}
+          onSelectCatalogFood={(item) => { setSelectedCatalogFood(item); setFoodName(item.name); setFoodGrams('100'); setFoodKcal(String(item.kcalPer100g)); }}
           weightValue={weightValue} setWeightValue={setWeightValue} strengthName={strengthName}
           setStrengthName={setStrengthName} strengthMinutes={strengthMinutes}
           setStrengthMinutes={setStrengthMinutes} strengthSets={strengthSets} setStrengthSets={setStrengthSets}
@@ -421,7 +438,7 @@ function RecordScreen(props: {
       <View style={styles.recordHeading}><Text style={styles.sectionTitle}>体重</Text><Pressable style={styles.smallAdd} onPress={props.onWeight}><Text style={styles.smallAddText}>＋ 入力</Text></Pressable></View>
       <View style={styles.recordCard}><Text style={styles.recordValue}>{props.today.weight ? `${props.today.weight.toFixed(1)} kg` : 'まだ記録がありません'}</Text><Text style={styles.recordMeta}>朝起きてトイレの後の測定がおすすめ</Text></View>
       <View style={styles.recordHeading}><Text style={styles.sectionTitle}>食事・間食</Text><Pressable style={styles.smallAdd} onPress={() => props.onAdd('food')}><Text style={styles.smallAddText}>＋ 追加</Text></Pressable></View>
-      {props.today.foods.length === 0 ? <EmptyRow text="食事の記録はまだありません" /> : props.today.foods.map((food) => <View key={food.id} style={styles.listCard}><View style={styles.listIcon}><Text>●</Text></View><View style={styles.listMain}><Text style={styles.listTitle}>{food.name}</Text><Text style={styles.listMeta}>{food.meal}</Text></View><Text style={styles.listKcal}>{food.kcal} kcal</Text><Pressable onPress={() => props.onRemoveFood(food.id)} hitSlop={10}><Text style={styles.remove}>×</Text></Pressable></View>)}
+      {props.today.foods.length === 0 ? <EmptyRow text="食事の記録はまだありません" /> : props.today.foods.map((food) => <View key={food.id} style={styles.listCard}><View style={styles.listIcon}><Text>●</Text></View><View style={styles.listMain}><Text style={styles.listTitle}>{food.name}</Text><Text style={styles.listMeta}>{food.meal}{food.quantityGrams ? ` · ${food.quantityGrams}g` : ''}</Text></View><Text style={styles.listKcal}>{food.kcal} kcal</Text><Pressable onPress={() => props.onRemoveFood(food.id)} hitSlop={10}><Text style={styles.remove}>×</Text></Pressable></View>)}
       <View style={styles.recordHeading}><Text style={styles.sectionTitle}>筋トレ（手入力）</Text><Pressable style={styles.smallAdd} onPress={() => props.onAdd('strength')}><Text style={styles.smallAddText}>＋ 追加</Text></Pressable></View>
       {props.today.strength.length === 0 ? <EmptyRow text="ヘルスケアの運動とは別に記録します" /> : props.today.strength.map((workout) => <View key={workout.id} style={styles.listCard}><View style={[styles.listIcon, { backgroundColor: '#10352F' }]}><Text style={{ color: COLORS.mint }}>↗</Text></View><View style={styles.listMain}><Text style={styles.listTitle}>{workout.name}</Text><Text style={styles.listMeta}>{workout.sets}セット × {workout.reps}回 ・ {workout.minutes}分{workout.alsoInHealth ? ' ・ 重複除外' : ''}</Text></View><Text style={[styles.listKcal, { color: COLORS.mint }]}>~{workout.kcal} kcal</Text><Pressable onPress={() => props.onRemoveStrength(workout.id)} hitSlop={10}><Text style={styles.remove}>×</Text></Pressable></View>)}
       <Text style={styles.footnote}>筋トレの消費カロリーは時間からの概算です。Appleヘルスケアにも同じ運動がある場合は、登録時に重複計上を避けられます。</Text>
@@ -540,7 +557,9 @@ function ChartCard({ title, subtitle, data, color, suffix, max }: { title: strin
 function EntryDialog(props: {
   modal: EntryModal; onClose: () => void; onSaveFood: () => void; onSaveWeight: () => void; onSaveStrength: () => void;
   foodName: string; setFoodName: (value: string) => void; foodKcal: string; setFoodKcal: (value: string) => void;
-  foodMeal: string; setFoodMeal: (value: string) => void; weightValue: string; setWeightValue: (value: string) => void;
+  foodMeal: string; setFoodMeal: (value: string) => void; foodSearch: string; setFoodSearch: (value: string) => void;
+  foodGrams: string; onFoodGramsChange: (value: string) => void; onSelectCatalogFood: (item: CatalogFood) => void;
+  weightValue: string; setWeightValue: (value: string) => void;
   strengthName: string; setStrengthName: (value: string) => void; strengthMinutes: string; setStrengthMinutes: (value: string) => void;
   strengthSets: string; setStrengthSets: (value: string) => void; strengthReps: string; setStrengthReps: (value: string) => void;
   strengthAlsoInHealth: boolean; setStrengthAlsoInHealth: (value: boolean) => void;
@@ -548,17 +567,22 @@ function EntryDialog(props: {
 }) {
   const visible = Boolean(props.modal);
   const title = props.modal === 'food' ? '食事を追加' : props.modal === 'weight' ? '体重を記録' : '筋トレを記録';
+  const normalizedQuery = props.foodSearch.trim().toLocaleLowerCase();
+  const foodMatches = FOOD_CATALOG.filter((item) => !normalizedQuery || item.name.toLocaleLowerCase().includes(normalizedQuery));
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={props.onClose}>
       <KeyboardAvoidingView style={styles.modalBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <Pressable style={styles.modalDismiss} onPress={props.onClose} />
         <View style={styles.modalSheet}>
           <View style={styles.modalHandle} /><View style={styles.modalTitleRow}><Text style={styles.modalTitle}>{title}</Text><Pressable onPress={props.onClose}><Text style={styles.closeButton}>×</Text></Pressable></View>
+          <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           {props.modal === 'food' && <>
             <Text style={styles.inputLabel}>食事区分</Text><View style={styles.chips}>{['朝食', '昼食', '夕食', '間食'].map((item) => <Pressable key={item} onPress={() => props.setFoodMeal(item)} style={[styles.chip, props.foodMeal === item && styles.chipActive]}><Text style={[styles.chipText, props.foodMeal === item && styles.chipTextActive]}>{item}</Text></Pressable>)}</View>
-            <Text style={styles.inputLabel}>食品名</Text><TextInput value={props.foodName} onChangeText={props.setFoodName} placeholder="例：鶏むね肉、ご飯" placeholderTextColor={COLORS.muted} style={styles.input} />
-            <Text style={styles.inputLabel}>カロリー（kcal）</Text><TextInput value={props.foodKcal} onChangeText={props.setFoodKcal} placeholder="例：320" placeholderTextColor={COLORS.muted} keyboardType="decimal-pad" style={styles.input} />
-            <Text style={styles.modalHint}>食品検索・写真推定は次の実装段階で追加します。</Text>
+            <Text style={styles.inputLabel}>食品を検索（文科省データ）</Text><TextInput value={props.foodSearch} onChangeText={props.setFoodSearch} placeholder="例：ご飯、鶏むね肉" placeholderTextColor={COLORS.muted} style={styles.input} />
+            <View style={styles.foodResults}>{foodMatches.map((item) => <Pressable key={item.id} onPress={() => props.onSelectCatalogFood(item)} style={styles.foodResult}><Text style={styles.foodResultName}>{item.name}</Text><Text style={styles.foodResultKcal}>{item.kcalPer100g} kcal / 100g</Text></Pressable>)}{foodMatches.length === 0 ? <Text style={styles.modalHint}>候補がありません。下の食品名とカロリーを手入力できます。</Text> : null}</View>
+            <Text style={styles.inputLabel}>食品名（手入力・編集可）</Text><TextInput value={props.foodName} onChangeText={props.setFoodName} placeholder="例：鶏むね肉、ご飯" placeholderTextColor={COLORS.muted} style={styles.input} />
+            <View style={styles.inputRow}><View style={styles.inputHalf}><Text style={styles.inputLabel}>量（g）</Text><TextInput value={props.foodGrams} onChangeText={props.onFoodGramsChange} placeholder="100" placeholderTextColor={COLORS.muted} keyboardType="decimal-pad" style={styles.input} /></View><View style={styles.inputHalf}><Text style={styles.inputLabel}>カロリー（kcal）</Text><TextInput value={props.foodKcal} onChangeText={props.setFoodKcal} placeholder="例：320" placeholderTextColor={COLORS.muted} keyboardType="decimal-pad" style={styles.input} /></View></View>
+            <Text style={styles.modalHint}>食品成分値は可食部100g当たりの目安です。商品や調理法によって異なります。出典：日本食品標準成分表（八訂）増補2023年。</Text>
             <PrimaryButton label="食事を保存" onPress={props.onSaveFood} />
           </>}
           {props.modal === 'weight' && <>
@@ -575,6 +599,7 @@ function EntryDialog(props: {
             </Pressable>
             <Text style={styles.modalHint}>消費カロリーは体重と時間からの大まかな推定です。</Text><PrimaryButton label="筋トレを保存" onPress={props.onSaveStrength} />
           </>}
+          </ScrollView>
         </View>
       </KeyboardAvoidingView>
     </Modal>
@@ -621,7 +646,7 @@ const styles = StyleSheet.create({
   recordHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 15, marginBottom: 9 }, smallAdd: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, backgroundColor: '#39261F' }, smallAddText: { color: COLORS.orange, fontSize: 10, fontWeight: '800' }, recordCard: { backgroundColor: COLORS.surface, borderRadius: 15, borderWidth: 1, borderColor: '#203149', padding: 14 }, recordValue: { color: COLORS.text, fontSize: 19, fontWeight: '800' }, recordMeta: { color: COLORS.muted, fontSize: 10, marginTop: 5 }, listCard: { backgroundColor: COLORS.surface, borderRadius: 14, padding: 11, marginBottom: 7, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#1C2C40' }, listIcon: { width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: '#38271F' }, listMain: { flex: 1, marginLeft: 9 }, listTitle: { color: COLORS.text, fontSize: 11, fontWeight: '700' }, listMeta: { color: COLORS.muted, fontSize: 9, marginTop: 3 }, listKcal: { color: COLORS.orange, fontSize: 10, fontWeight: '800', marginHorizontal: 6 }, remove: { color: COLORS.muted, fontSize: 18, paddingHorizontal: 2 }, emptyRow: { backgroundColor: '#0D1928', borderRadius: 13, padding: 14, borderWidth: 1, borderColor: '#1A2A3E', borderStyle: 'dashed' }, emptyText: { color: COLORS.muted, fontSize: 10, textAlign: 'center' },
   trendHighlight: { backgroundColor: COLORS.surface, borderRadius: 18, padding: 17, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderColor: '#203149', marginBottom: 14 }, trendBig: { color: COLORS.text, fontSize: 31, fontWeight: '800', marginTop: 5 }, trendGoal: { alignItems: 'flex-end' }, goalCaption: { color: COLORS.muted, fontSize: 9, fontWeight: '800', letterSpacing: 1 }, goalValue: { color: COLORS.orange, fontWeight: '800', fontSize: 17, marginTop: 4 }, chartCard: { backgroundColor: COLORS.surface, borderRadius: 18, padding: 15, marginBottom: 12, borderWidth: 1, borderColor: '#203149' }, chartTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }, chartTitle: { color: COLORS.text, fontSize: 13, fontWeight: '800' }, chartSubtitle: { color: COLORS.muted, fontSize: 9, marginTop: 4 }, chartLatest: { fontSize: 12, fontWeight: '800' }, chartBars: { height: 128, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-around', paddingTop: 20, marginTop: 6, borderBottomWidth: 1, borderBottomColor: COLORS.line }, chartColumn: { alignItems: 'center', justifyContent: 'flex-end', height: 120, flex: 1 }, chartBar: { width: 13, minHeight: 4, borderRadius: 5 }, chartLabel: { color: COLORS.muted, fontSize: 8, marginTop: 6, height: 13 },
   settingsCard: { backgroundColor: COLORS.surface, borderRadius: 17, paddingHorizontal: 14, paddingVertical: 14, borderWidth: 1, borderColor: '#203149' }, profileField: { marginBottom: 4 }, profileHint: { color: COLORS.muted, fontSize: 9, marginTop: 4 }, settingRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 13 }, settingBorder: { borderBottomWidth: 1, borderBottomColor: COLORS.line }, settingLabel: { color: COLORS.muted, fontSize: 11 }, settingValue: { color: COLORS.text, fontSize: 11, fontWeight: '700' }, infoCard: { backgroundColor: COLORS.surface, borderRadius: 16, padding: 14, marginTop: 13, borderWidth: 1, borderColor: '#203149' }, infoTitle: { color: COLORS.text, fontSize: 12, fontWeight: '800' }, infoText: { color: COLORS.muted, fontSize: 10, lineHeight: 16, marginTop: 7 },
-  modalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: '#0009' }, modalDismiss: { flex: 1 }, modalSheet: { backgroundColor: '#0D1928', borderTopLeftRadius: 25, borderTopRightRadius: 25, paddingHorizontal: 20, paddingTop: 10, paddingBottom: 30, borderTopWidth: 1, borderColor: COLORS.line }, modalHandle: { width: 38, height: 4, borderRadius: 5, alignSelf: 'center', backgroundColor: '#52647A', marginBottom: 14 }, modalTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }, modalTitle: { color: COLORS.text, fontSize: 18, fontWeight: '800' }, closeButton: { color: COLORS.muted, fontSize: 24, paddingHorizontal: 4 }, inputLabel: { color: COLORS.muted, fontSize: 10, fontWeight: '700', marginBottom: 6, marginTop: 9 }, input: { borderWidth: 1, borderColor: COLORS.line, backgroundColor: COLORS.surface, color: COLORS.text, borderRadius: 12, paddingHorizontal: 13, paddingVertical: 12, fontSize: 13 }, weightInput: { fontSize: 24, fontWeight: '800', paddingVertical: 15 }, inputRow: { flexDirection: 'row', gap: 10 }, inputHalf: { flex: 1 }, chips: { flexDirection: 'row', gap: 7, marginBottom: 3 }, chip: { paddingHorizontal: 11, paddingVertical: 7, backgroundColor: COLORS.surface, borderRadius: 15, borderWidth: 1, borderColor: COLORS.line }, chipActive: { backgroundColor: '#39261F', borderColor: COLORS.orange }, chipText: { color: COLORS.muted, fontSize: 10 }, chipTextActive: { color: COLORS.orange, fontWeight: '800' }, modalHint: { color: COLORS.muted, fontSize: 9, marginTop: 10, lineHeight: 14 }, primaryButton: { marginTop: 17, backgroundColor: COLORS.orange, paddingVertical: 14, borderRadius: 14, alignItems: 'center' }, primaryButtonText: { color: '#1B1512', fontSize: 12, fontWeight: '900' },
+  modalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: '#0009' }, modalDismiss: { flex: 1 }, modalSheet: { backgroundColor: '#0D1928', borderTopLeftRadius: 25, borderTopRightRadius: 25, paddingHorizontal: 20, paddingTop: 10, paddingBottom: 30, borderTopWidth: 1, borderColor: COLORS.line, maxHeight: '92%' }, modalHandle: { width: 38, height: 4, borderRadius: 5, alignSelf: 'center', backgroundColor: '#52647A', marginBottom: 14 }, modalTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }, modalTitle: { color: COLORS.text, fontSize: 18, fontWeight: '800' }, closeButton: { color: COLORS.muted, fontSize: 24, paddingHorizontal: 4 }, inputLabel: { color: COLORS.muted, fontSize: 10, fontWeight: '700', marginBottom: 6, marginTop: 9 }, input: { borderWidth: 1, borderColor: COLORS.line, backgroundColor: COLORS.surface, color: COLORS.text, borderRadius: 12, paddingHorizontal: 13, paddingVertical: 12, fontSize: 13 }, weightInput: { fontSize: 24, fontWeight: '800', paddingVertical: 15 }, inputRow: { flexDirection: 'row', gap: 10 }, inputHalf: { flex: 1 }, chips: { flexDirection: 'row', gap: 7, marginBottom: 3 }, foodResults: { maxHeight: 150, marginTop: 4 }, foodResult: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 11, borderBottomWidth: 1, borderBottomColor: COLORS.line }, foodResultName: { color: COLORS.text, fontSize: 11, flex: 1 }, foodResultKcal: { color: COLORS.mint, fontSize: 10, fontWeight: '700' }, chip: { paddingHorizontal: 11, paddingVertical: 7, backgroundColor: COLORS.surface, borderRadius: 15, borderWidth: 1, borderColor: COLORS.line }, chipActive: { backgroundColor: '#39261F', borderColor: COLORS.orange }, chipText: { color: COLORS.muted, fontSize: 10 }, chipTextActive: { color: COLORS.orange, fontWeight: '800' }, modalHint: { color: COLORS.muted, fontSize: 9, marginTop: 10, lineHeight: 14 }, primaryButton: { marginTop: 17, backgroundColor: COLORS.orange, paddingVertical: 14, borderRadius: 14, alignItems: 'center' }, primaryButtonText: { color: '#1B1512', fontSize: 12, fontWeight: '900' },
   duplicateRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12, paddingVertical: 7 }, checkbox: { width: 20, height: 20, borderRadius: 5, borderWidth: 1, borderColor: COLORS.muted, alignItems: 'center', justifyContent: 'center', marginRight: 9 }, checkboxActive: { backgroundColor: COLORS.mint, borderColor: COLORS.mint }, checkboxMark: { color: COLORS.bg, fontSize: 13, fontWeight: '900' }, duplicateText: { color: COLORS.text, fontSize: 10, flex: 1 },
 });
 
