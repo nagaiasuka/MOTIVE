@@ -236,7 +236,7 @@ function TodayScreen(props: {
       <View style={styles.heroCard}>
         <View style={styles.heroTop}><View><Text style={styles.cardLabel}>現在の体重</Text><Text style={styles.bigWeight}>{props.latestWeight.toFixed(1)}<Text style={styles.unit}> kg</Text></Text></View><View style={styles.targetBadge}><Text style={styles.targetCaption}>GOAL</Text><Text style={styles.targetNumber}>75 kg</Text><Text style={styles.targetDate}>6月1日</Text></View></View>
         <View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${progress * 100}%` }]} /></View>
-        <View style={styles.progressLabels}><Text style={styles.muted}>スタート 118 kg</Text><Text style={styles.muted}>あと {kgLeft.toFixed(1)} kg</Text></View>
+        <View style={styles.progressLabels}><Text style={styles.muted}>スタート {START_WEIGHT} kg</Text><Text style={styles.muted}>あと {kgLeft.toFixed(1)} kg</Text></View>
       </View>
       <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>今日のエネルギー</Text><Text style={styles.sectionHint}>推定値</Text></View>
       <View style={styles.energyCard}>
@@ -299,7 +299,7 @@ function TrendsScreen({ data, latestWeight }: { data: AppData; latestWeight: num
   return (
     <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
       <Text style={styles.pageTitle}>推移</Text><Text style={styles.pageSub}>続けた記録を、変化として見る</Text>
-      <View style={styles.trendHighlight}><View><Text style={styles.cardLabel}>直近7回の体重平均</Text><Text style={styles.trendBig}>{average.toFixed(1)}<Text style={styles.unit}> kg</Text></Text></View><View style={styles.trendGoal}><Text style={styles.goalCaption}>目標</Text><Text style={styles.goalValue}>95 kg</Text></View></View>
+      <View style={styles.trendHighlight}><View><Text style={styles.cardLabel}>直近7回の体重平均</Text><Text style={styles.trendBig}>{average.toFixed(1)}<Text style={styles.unit}> kg</Text></Text></View><View style={styles.trendGoal}><Text style={styles.goalCaption}>目標</Text><Text style={styles.goalValue}>{TARGET_WEIGHT} kg</Text></View></View>
       <ChartCard title="体重" subtitle="直近7日・記録した日のみ" data={days.map((d) => ({ label: d.key.slice(5).replace('-', '/'), value: d.weight }))} color={COLORS.orange} suffix="kg" />
       <ChartCard title="摂取カロリー" subtitle="1日目標 2,000 kcal" data={days.map((d) => ({ label: d.key.slice(5).replace('-', '/'), value: d.intake || undefined }))} color={COLORS.blue} suffix="kcal" max={2200} />
       <ChartCard title="推定消費カロリー" subtitle="基礎代謝 + 記録された活動" data={days.map((d) => ({ label: d.key.slice(5).replace('-', '/'), value: d.burn || undefined }))} color={COLORS.mint} suffix="kcal" />
@@ -415,3 +415,4 @@ const styles = StyleSheet.create({
 });
 
 export default App;
+
